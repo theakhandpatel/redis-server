@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,27 +18,23 @@ func handleClient(conn net.Conn) {
 	writer := bufio.NewWriter(conn)
 
 	for {
-		val, err := readRESPArray(reader)
-
-		if err != nil {
-			fmt.Println("Error reading command: ", err.Error())
+		values, err := DecodeRESP(reader)
+		if errors.Is(err, io.EOF) {
 			break
 		}
-
-		if len(val) == 0 {
-			continue
+		if err != nil {
+			fmt.Println("Error reading command: ", err.Error())
+			return
 		}
-		command := val[0]
-		args := val[1:]
+
+		command := values.Array()[0].String
+		args := values.Array()[1:]
+
 		switch strings.ToUpper(command) {
 		case "PING":
 			handlePing(writer)
 		case "ECHO":
-			if len(val) > 1 {
-				handleEcho(writer, args)
-			} else {
-				handleError(writer, "ERR wrong number of arguments for 'Echo' command")
-			}
+			handleEcho(writer, args)
 		default:
 			handleError(writer, "ERR unknown command '"+command+"'")
 		}
@@ -51,62 +48,19 @@ func handleClient(conn net.Conn) {
 	}
 }
 
-func readRESPArray(reader *bufio.Reader) ([]string, error) {
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, err
-	}
-
-	if line[0] != '*' {
-		return nil, fmt.Errorf("Invalid RESP array")
-	}
-
-	numArgs, err := strconv.Atoi(strings.TrimSpace(line[1:]))
-	if err != nil {
-		return nil, err
-	}
-
-	args := make([]string, numArgs)
-	for i := 0; i < numArgs; i++ {
-		line, err = reader.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-
-		if line[0] != '$' {
-			return nil, fmt.Errorf("Invalid RESP array")
-		}
-
-		argLen, err := strconv.Atoi(strings.TrimSpace(line[1:]))
-		if err != nil {
-			return nil, err
-		}
-
-		arg := make([]byte, argLen)
-		_, err = io.ReadFull(reader, arg)
-		if err != nil {
-			return nil, err
-		}
-
-		_, err = reader.Discard(2)
-		if err != nil {
-			return nil, err
-		}
-
-		args[i] = string(arg)
-	}
-	return args, nil
-}
-
 func handlePing(writer *bufio.Writer) {
 	writer.WriteString("+PONG\r\n")
 }
 
-func handleEcho(writer *bufio.Writer, args []string) {
-	message := strings.Join(args, " ")
-	writer.WriteString("$" + strconv.Itoa(len(message)) + "\r\n" + message + "\r\n")
+func handleEcho(writer *bufio.Writer, args []Value) {
+	var messages []string
 
-	writer.WriteString("$" + strconv.Itoa(len(message)) + "\r\n" + message + "\r\n")
+	for _, arg := range args {
+		messages = append(messages, arg.String)
+	}
+
+	response := strings.Join(messages, " ")
+	writer.WriteString("$" + strconv.Itoa(len(response)) + "\r\n" + response + "\r\n")
 }
 
 func handleError(writer *bufio.Writer, errMessage string) {
@@ -114,14 +68,13 @@ func handleError(writer *bufio.Writer, errMessage string) {
 }
 
 func main() {
-	fmt.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", ":6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
-
+	fmt.Println("Listening on :6379 ....")
 	defer l.Close()
 
 	for {
