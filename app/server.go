@@ -17,28 +17,29 @@ func handleClient(conn net.Conn) {
 	writer := bufio.NewWriter(conn)
 
 	for {
-		command, err := readRESPArray(reader)
+		val, err := readRESPArray(reader)
 
 		if err != nil {
 			fmt.Println("Error reading command: ", err.Error())
 			break
 		}
 
-		if len(command) == 0 {
+		if len(val) == 0 {
 			continue
 		}
-
-		switch strings.ToUpper(command[0]) {
+		command := val[0]
+		args := val[1:]
+		switch strings.ToUpper(command) {
 		case "PING":
 			handlePing(writer)
 		case "ECHO":
-			if len(command) > 1 {
-				handleEcho(writer, command[1])
+			if len(val) > 1 {
+				handleEcho(writer, args)
 			} else {
 				handleError(writer, "ERR wrong number of arguments for 'Echo' command")
 			}
 		default:
-			handleError(writer, "ERR unknown command '"+command[0]+"'")
+			handleError(writer, "ERR unknown command '"+command+"'")
 		}
 
 		err = writer.Flush()
@@ -101,7 +102,10 @@ func handlePing(writer *bufio.Writer) {
 	writer.WriteString("+PONG\r\n")
 }
 
-func handleEcho(writer *bufio.Writer, message string) {
+func handleEcho(writer *bufio.Writer, args []string) {
+	message := strings.Join(args, " ")
+	writer.WriteString("$" + strconv.Itoa(len(message)) + "\r\n" + message + "\r\n")
+
 	writer.WriteString("$" + strconv.Itoa(len(message)) + "\r\n" + message + "\r\n")
 }
 
