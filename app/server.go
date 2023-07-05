@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func handleClient(conn net.Conn) {
+func handleClient(conn net.Conn, store *Redis) {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
@@ -31,6 +31,10 @@ func handleClient(conn net.Conn) {
 		args := values.Array()[1:]
 
 		switch strings.ToUpper(command) {
+		case "SET":
+			handleSet(writer, args, store)
+		case "GET":
+			handleGet(writer, args, store)
 		case "PING":
 			handlePing(writer)
 		case "ECHO":
@@ -46,6 +50,45 @@ func handleClient(conn net.Conn) {
 		}
 
 	}
+}
+
+func handleSet(writer *bufio.Writer, args []Value, store *Redis) {
+	if len(args) < 2 {
+		handleError(writer, "Arguments are less")
+		return
+	}
+	key := args[0].String
+	value := args[1].String
+
+	err := store.Set(key, value)
+	if err != nil {
+		handleError(writer, "no")
+		return
+	}
+
+	writer.WriteString("+ok\r\n")
+}
+
+func handleGet(writer *bufio.Writer, args []Value, store *Redis) {
+	if len(args) < 1 {
+		handleError(writer, "Arguments are less")
+		return
+	}
+	key := args[0].String
+
+	value, err := store.Get(key)
+	if err != nil {
+		writer.WriteString("-" + err.Error() + "\r\n")
+		writer.Flush()
+		return
+	}
+
+	if value == "" {
+		writer.WriteString("$-1\r\n")
+	} else {
+		writer.WriteString("+" + value + "\r\n")
+	}
+	writer.Flush()
 }
 
 func handlePing(writer *bufio.Writer) {
@@ -77,6 +120,8 @@ func main() {
 	fmt.Println("Listening on :6379 ....")
 	defer l.Close()
 
+	store := NewRedis()
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -84,6 +129,6 @@ func main() {
 			break
 		}
 
-		go handleClient(conn)
+		go handleClient(conn, store)
 	}
 }
