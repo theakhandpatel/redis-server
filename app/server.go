@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func handleClient(conn net.Conn, store *Redis) {
@@ -59,8 +60,17 @@ func handleSet(writer *bufio.Writer, args []Value, store *Redis) {
 	}
 	key := args[0].String
 	value := args[1].String
+	var expiry time.Duration
 
-	err := store.Set(key, value)
+	if len(args) >= 4 && strings.ToUpper(args[2].String) == "PX" {
+		expiryMs, err := strconv.Atoi(args[3].String)
+		if err != nil {
+			handleError(writer, "Invalid arguments")
+		}
+		expiry = time.Duration(expiryMs) * time.Millisecond
+
+	}
+	err := store.Set(key, value, expiry)
 	if err != nil {
 		handleError(writer, "no")
 		return
@@ -79,16 +89,16 @@ func handleGet(writer *bufio.Writer, args []Value, store *Redis) {
 	value, err := store.Get(key)
 	if err != nil {
 		writer.WriteString("-" + err.Error() + "\r\n")
-		writer.Flush()
 		return
 	}
 
 	if value == "" {
 		writer.WriteString("$-1\r\n")
-	} else {
-		writer.WriteString("+" + value + "\r\n")
+		return
 	}
-	writer.Flush()
+
+	writer.WriteString("+" + value + "\r\n")
+
 }
 
 func handlePing(writer *bufio.Writer) {
